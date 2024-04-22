@@ -1,6 +1,10 @@
-﻿using Dalamud.Game.ClientState.JobGauge.Types;
+﻿using Avarice.StaticData;
+using Dalamud.Game.ClientState.JobGauge.Types;
+using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Utility;
 using ECommons.GameFunctions;
+using ECommons.GameHelpers;
 using ECommons.MathHelpers;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using static Avarice.Drawing.DrawFunctions;
@@ -10,6 +14,34 @@ namespace Avarice.Drawing;
 
 internal unsafe static class Functions
 {
+    internal static void DrawTankMiddle()
+    {
+        if (!P.currentProfile.EnableTankMiddle && !P.currentProfile.EnableDutyMiddle) return; //get out early
+        if (Player.Available && Util.TryAutoDetectMiddleOfArena(out var mid))
+        {
+            var points = P.config.DutyMiddleExtras.Where(x => x.TerritoryType == Svc.ClientState.TerritoryType);
+            if (P.currentProfile.EnableTankMiddle && Svc.Targets.Target is BattleNpc bnpc)
+            {
+                var distance = Vector3.Distance(mid, bnpc.Position);
+                foreach(var x in points)
+                {
+                    var addDistance = Vector3.Distance(x.Position, bnpc.Position);
+                    if(addDistance < distance) distance = addDistance;
+                }
+                var col = distance > P.config.DutyMidRadius ? P.config.UncenteredPixelColor : P.config.CenteredPixelColor;
+                Util.DrawDot(bnpc.Position, P.config.CenterPixelThickness, col);
+            }
+            if (P.currentProfile.EnableDutyMiddle)
+            {
+                Util.DrawDot(mid, P.config.CenterPixelThickness, P.config.DutyMidPixelCol);
+                foreach (var x in points)
+                {
+                    Util.DrawDot(x.Position, P.config.CenterPixelThickness, P.config.DutyMidPixelCol);
+                }
+            }
+        }
+    }
+
     internal static void DrawFrontalPosition(GameObject go) 
     {
         if (go is BattleNpc bnpc && bnpc.IsHostile() &&
@@ -29,6 +61,30 @@ internal unsafe static class Functions
 
     internal static void DrawAnticipatedPos(BattleNpc bnpc)
     {
+        if(Svc.PluginInterface.TryGetData<List<uint>>("Avarice.ActionOverride", out var overrideData) && overrideData[0] != 0)
+        {
+            if (Data.ActionPositional.TryGetValue((ActionID)overrideData[0], out var pos))
+            {
+                if(pos == EnemyPositional.Rear)
+                {
+                    DrawRear();
+                    return;
+                }
+                else if(pos == EnemyPositional.Flank)
+                {
+                    DrawSides();
+                    return;
+                }
+            }
+            return;
+        }
+
+        void DrawRear() => ActorConeXZ(bnpc, bnpc.HitboxRadius + GetSkillRadius(), Maths.Radians(180 - 45), Maths.Radians(180 + 45), P.currentProfile.AnticipatedPieSettings);
+        void DrawSides()
+        {
+            ActorConeXZ(bnpc, bnpc.HitboxRadius + GetSkillRadius(), Maths.Radians(270 - 45), Maths.Radians(270 + 45), P.currentProfile.AnticipatedPieSettingsFlank);
+            ActorConeXZ(bnpc, bnpc.HitboxRadius + GetSkillRadius(), Maths.Radians(90 - 45), Maths.Radians(90 + 45), P.currentProfile.AnticipatedPieSettingsFlank);
+        }
         var move = *P.memory.LastComboMove;
         var mnk = Svc.ClientState.LocalPlayer.ClassJob.Id == 20 && Svc.ClientState.LocalPlayer.Level >= 30;
         var mnkRear = mnk && MnkIsRear(bnpc);
@@ -42,7 +98,7 @@ internal unsafe static class Functions
             || Util.CanExecuteWheelingThrust() ||  (move.EqualsAny(87u) && drglvl)
             ) //rear
         {
-            ActorConeXZ(bnpc, bnpc.HitboxRadius + GetSkillRadius(), Maths.Radians(180 - 45), Maths.Radians(180 + 45), P.currentProfile.AnticipatedPieSettings);
+            DrawRear();
         }
         else if (move.EqualsAny(7479u)
             || Util.CanExecuteGibbet()
@@ -51,10 +107,11 @@ internal unsafe static class Functions
             || Util.CanExecuteFangAndClaw()
             ) //sides/flank
         {
-            ActorConeXZ(bnpc, bnpc.HitboxRadius + GetSkillRadius(), Maths.Radians(270 - 45), Maths.Radians(270 + 45), P.currentProfile.AnticipatedPieSettingsFlank);
-            ActorConeXZ(bnpc, bnpc.HitboxRadius + GetSkillRadius(), Maths.Radians(90 - 45), Maths.Radians(90 + 45), P.currentProfile.AnticipatedPieSettingsFlank);
+            DrawSides();
         }
     }
+
+
 
     private static bool MnkIsRear(BattleNpc bnpc)
     {
